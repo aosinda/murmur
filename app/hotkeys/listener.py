@@ -110,8 +110,6 @@ class HotkeyListener:
     def _handle_flags_changed(self, event) -> None:
         flags = Quartz.CGEventGetFlags(event)
         fn_pressed = bool(flags & kCGEventFlagMaskSecondaryFn)
-        print(f"[Murmur] flags={flags:#x} fn_pressed={fn_pressed} fn_held={self._fn_held} recording={self._recording} toggle={self._toggle_active}", flush=True)
-
         if fn_pressed and not self._fn_held:
             # Fn just pressed
             self._fn_held = True
@@ -120,15 +118,12 @@ class HotkeyListener:
             if self._toggle_active:
                 self._toggle_active = False
                 self._stop_recording()
-                print("[Murmur] Toggle stopped", flush=True)
             elif not self._recording:
                 self._start_recording()
-                print("[Murmur] Push-to-talk started", flush=True)
 
         elif not fn_pressed and self._fn_held:
             # Fn just released
             self._fn_held = False
-            print("[Murmur] Fn released", flush=True)
 
             if self._space_pressed_with_fn:
                 # Space was pressed during this Fn hold → enter toggle mode

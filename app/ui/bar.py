@@ -117,7 +117,6 @@ class DictationBar(QWidget):
 
     def show_recording(self) -> None:
         """Show the bar and start the timer."""
-        print("[Murmur] Bar: show_recording called", flush=True)
         self._elapsed_seconds = 0
         self._timer_label.setText("0:00")
         self._position_bottom_center()

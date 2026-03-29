@@ -16,6 +16,11 @@ build/
 .venv/
 venv/
 
+# Build files (keep locally, not in repo)
+build_app.py
+murmur.spec
+setup.py
+
 # Audio temp files
 *.wav
 *.mp3
