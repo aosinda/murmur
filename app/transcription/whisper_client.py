@@ -7,7 +7,7 @@ from openai import OpenAI
 class WhisperClient:
     """Transcribes audio using OpenAI's Whisper API."""
 
-    DEFAULT_MODEL = "whisper-1"
+    DEFAULT_MODEL = "gpt-4o-mini-transcribe"
 
     def __init__(self, api_key: str, model: str | None = None):
         self._client = OpenAI(api_key=api_key)
@@ -44,7 +44,7 @@ class WhisperClient:
         kwargs = {
             "model": self._model,
             "file": audio_file,
-            "response_format": "verbose_json",
+            "response_format": "json",
         }
         if language_hint:
             kwargs["language"] = language_hint
@@ -53,7 +53,7 @@ class WhisperClient:
 
         return {
             "text": response.text,
-            "language": getattr(response, "language", "unknown"),
+            "language": getattr(response, "language", language_hint or "en"),
         }
 
     @staticmethod
