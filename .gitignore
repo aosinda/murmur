@@ -1,0 +1,47 @@
+# Environment & secrets
+.env
+*.env
+
+# Database & user data
+data/murmur.db
+data/dictionary.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Audio temp files
+*.wav
+*.mp3
+*.ogg
+*.flac
+
+# Screenshots & images
+*.png
+*.jpg
+*.jpeg
+
+# App bundle & icons
+*.icns
+*.app
+
+# Data directory (user-specific)
+data/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
