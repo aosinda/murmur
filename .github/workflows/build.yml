@@ -52,12 +52,30 @@ jobs:
       - name: Ad-hoc sign
         run: codesign --force --deep --sign - "dist/Murmur.app"
 
-      - name: Create DMG
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Create styled DMG
         run: |
-          mkdir -p dmg_contents
-          cp -r dist/Murmur.app dmg_contents/
-          ln -s /Applications dmg_contents/Applications
-          hdiutil create -volname "Murmur" -srcfolder dmg_contents -ov -format UDZO "Murmur-macOS.dmg"
+          create-dmg \
+            --volname "Murmur" \
+            --volicon "dist/Murmur.app/Contents/Resources/Murmur.icns" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "Murmur.app" 150 185 \
+            --app-drop-link 450 185 \
+            --hide-extension "Murmur.app" \
+            --no-internet-enable \
+            "Murmur-macOS.dmg" \
+            "dist/Murmur.app" \
+          || {
+            echo "create-dmg styling failed, falling back to plain DMG"
+            mkdir -p dmg_contents
+            cp -r dist/Murmur.app dmg_contents/
+            ln -s /Applications dmg_contents/Applications
+            hdiutil create -volname "Murmur" -srcfolder dmg_contents -ov -format UDZO "Murmur-macOS.dmg"
+          }
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
