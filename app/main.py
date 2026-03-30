@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 
 from dotenv import load_dotenv
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
@@ -20,9 +20,10 @@ from app.cleanup.formatter import TextFormatter
 from app.output.injector import TextInjector
 from app.storage.db import MurmurDB
 from app.ui.bar import DictationBar
+from app.ui.onboarding import OnboardingWindow
+from app.ui.main_window import MainWindow
 from app.ui.settings import SettingsWindow
 from app.ui.dictionary import DictionaryEditor
-from app.ui.stats import StatsWindow
 
 
 # Load .env — check multiple locations
@@ -49,20 +50,36 @@ class Murmur:
     def __init__(self):
         self._app = QApplication(sys.argv)
         self._app.setApplicationName("Murmur")
-        self._app.setQuitOnLastWindowClosed(False)  # Keep running in tray
-
-        # ── Initialize modules ──
-        api_key = os.environ.get("OPENAI_API_KEY", "")
-        if not api_key:
-            print("ERROR: OPENAI_API_KEY not set. Create a .env file.")
-            sys.exit(1)
+        self._app.setQuitOnLastWindowClosed(False)
 
         self._db = MurmurDB()
+        self._signals = PipelineSignals()
+
+        # Check if onboarding is needed
+        if self._db.get_setting("onboarding_complete") != "true":
+            self._onboarding = OnboardingWindow(
+                db=self._db, on_complete=self._start_app
+            )
+            self._onboarding.show()
+        else:
+            self._start_app()
+
+    def _start_app(self):
+        """Initialize all modules and start the app."""
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
+            # Re-check from file in case onboarding just wrote it
+            load_dotenv(_config_dir / ".env", override=True)
+            api_key = os.environ.get("OPENAI_API_KEY", "")
+
+        if not api_key:
+            print("ERROR: OPENAI_API_KEY not set.")
+            sys.exit(1)
+
         self._recorder = AudioRecorder()
         self._whisper = WhisperClient(api_key=api_key)
         self._formatter = TextFormatter(api_key=api_key)
         self._injector = TextInjector()
-        self._signals = PipelineSignals()
 
         # Load saved mic device
         saved_mic = self._db.get_setting("mic_device_id")
@@ -72,11 +89,11 @@ class Murmur:
             except (ValueError, TypeError):
                 pass
 
-        # ── Initialize UI ──
+        # ── UI ──
         self._bar = DictationBar()
+        self._main_window = MainWindow(db=self._db)
         self._settings_window = SettingsWindow(db=self._db)
         self._dictionary_window = DictionaryEditor(formatter=self._formatter)
-        self._stats_window = StatsWindow(db=self._db)
 
         # ── System tray ──
         self._setup_tray()
@@ -101,7 +118,6 @@ class Murmur:
         self._tray = QSystemTrayIcon(self._app)
         self._tray.setToolTip("Murmur — Voice Dictation")
 
-        # Create a simple colored icon (small circle)
         from PyQt6.QtGui import QPixmap, QPainter, QColor
         pixmap = QPixmap(22, 22)
         pixmap.fill(QColor(0, 0, 0, 0))
@@ -115,9 +131,11 @@ class Murmur:
 
         menu = QMenu()
 
-        stats_action = QAction("Stats", menu)
-        stats_action.triggered.connect(self._show_stats)
-        menu.addAction(stats_action)
+        open_action = QAction("Open Murmur", menu)
+        open_action.triggered.connect(self._show_main)
+        menu.addAction(open_action)
+
+        menu.addSeparator()
 
         dict_action = QAction("Dictionary", menu)
         dict_action.triggered.connect(self._show_dictionary)
@@ -134,12 +152,17 @@ class Murmur:
         menu.addAction(quit_action)
 
         self._tray.setContextMenu(menu)
+        self._tray.activated.connect(self._on_tray_click)
         self._tray.show()
+
+    def _on_tray_click(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self._show_main()
 
     def _connect_signals(self) -> None:
         """Wire up cross-thread signals to UI updates."""
-        self._signals.recording_started.connect(self._bar.show_recording)
-        self._signals.recording_cancelled.connect(self._bar.hide_recording)
+        self._signals.recording_started.connect(self._on_recording_started)
+        self._signals.recording_cancelled.connect(self._on_recording_cancelled)
         self._signals.recording_stopped.connect(self._process_audio)
         self._signals.processing_done.connect(self._deliver_text)
         self._signals.error_occurred.connect(self._on_error)
@@ -153,65 +176,67 @@ class Murmur:
 
     # ── Recording control ──────────────────────────────────────────
 
+    def _on_recording_started(self):
+        self._bar.show_recording()
+        self._main_window.set_status("recording")
+
+    def _on_recording_cancelled(self):
+        self._bar.hide_recording()
+        self._main_window.set_status("ready")
+
     def _on_hotkey_start(self) -> None:
-        """Called from hotkey thread when recording should start."""
         self._recorder.start()
         self._signals.recording_started.emit()
 
     def _on_hotkey_stop(self) -> None:
-        """Called from hotkey thread when recording should stop."""
         duration = self._recorder.get_duration()
         audio_bytes = self._recorder.stop()
         self._signals.recording_stopped.emit(audio_bytes, duration)
 
     def _on_hotkey_cancel(self) -> None:
-        """Called from hotkey thread when recording is cancelled."""
         self._recorder.cancel()
         self._signals.recording_cancelled.emit()
 
     def _on_reinsert(self) -> None:
-        """Called from hotkey thread: Ctrl+Cmd+V re-inserts last output."""
         last = self._injector.get_last_text()
         if last:
             self._signals.processing_done.emit(last)
 
     def _stop_recording(self) -> None:
-        """Stop recording from UI button."""
         if self._recorder.is_recording:
             self._on_hotkey_stop()
 
     def _cancel_recording(self) -> None:
-        """Cancel recording from UI button."""
         if self._recorder.is_recording:
             self._recorder.cancel()
         self._bar.hide_recording()
+        self._main_window.set_status("ready")
 
     # ── Processing pipeline ────────────────────────────────────────
 
     def _process_audio(self, audio_bytes: bytes, duration: float) -> None:
-        """Run transcription + cleanup in a background thread."""
         self._bar.hide_recording()
+        self._main_window.set_status("processing")
 
         if not audio_bytes or duration < 0.3:
-            return  # Too short, ignore
+            self._main_window.set_status("ready")
+            return
 
         def _pipeline():
             try:
-                # Get configured languages
                 lang_setting = self._db.get_setting(
                     "languages", "English,Bosnian,Danish"
                 )
                 languages = [l.strip() for l in lang_setting.split(",")]
 
-                # Step 1: Transcribe
                 result = self._whisper.transcribe(audio_bytes, languages=languages)
                 raw_text = result["text"]
                 language = result["language"]
 
                 if not raw_text.strip():
+                    self._main_window.set_status("ready")
                     return
 
-                # Step 2: Clean up
                 vibe = self._db.get_setting("vibe_coding", "False")
                 cleaned = self._formatter.format(
                     raw_text=raw_text,
@@ -219,7 +244,6 @@ class Murmur:
                     vibe_coding=vibe.lower() == "true",
                 )
 
-                # Step 3: Save to DB
                 mode = "vibe_coding" if vibe.lower() == "true" else "normal"
                 self._db.save_dictation(
                     raw_text=raw_text,
@@ -229,7 +253,6 @@ class Murmur:
                     duration_seconds=duration,
                 )
 
-                # Step 4: Deliver
                 self._signals.processing_done.emit(cleaned)
 
             except Exception as e:
@@ -239,15 +262,22 @@ class Murmur:
         thread.start()
 
     def _deliver_text(self, text: str) -> None:
-        """Inject cleaned text into focused field or clipboard."""
         if not text:
             return
+
+        self._main_window.set_status("ready")
+        self._main_window.refresh()
 
         success = self._injector.inject(text)
         if not success:
             self._injector.to_clipboard(text)
 
     # ── UI actions ─────────────────────────────────────────────────
+
+    def _show_main(self) -> None:
+        self._main_window.refresh()
+        self._main_window.show()
+        self._main_window.raise_()
 
     def _show_settings(self) -> None:
         self._settings_window.show()
@@ -257,13 +287,7 @@ class Murmur:
         self._dictionary_window.show()
         self._dictionary_window.raise_()
 
-    def _show_stats(self) -> None:
-        self._stats_window.refresh()
-        self._stats_window.show()
-        self._stats_window.raise_()
-
     def _on_settings_changed(self, settings: dict) -> None:
-        """Apply changed settings."""
         mic_id = settings.get("mic_device_id")
         if mic_id:
             try:
@@ -272,7 +296,7 @@ class Murmur:
                 self._recorder.set_device(None)
 
     def _on_error(self, error_msg: str) -> None:
-        """Handle pipeline errors."""
+        self._main_window.set_status("ready")
         print(f"Murmur error: {error_msg}")
         self._tray.showMessage(
             "Murmur Error",
@@ -282,7 +306,6 @@ class Murmur:
         )
 
     def _quit(self) -> None:
-        """Clean shutdown."""
         self._hotkeys.stop()
         self._db.close()
         self._app.quit()
@@ -290,9 +313,6 @@ class Murmur:
     # ── Run ────────────────────────────────────────────────────────
 
     def run(self) -> int:
-        """Start the application."""
-        print("Murmur is running. Use Fn (hold) or Fn+Space (toggle) to dictate.")
-        print("Right-click the tray icon for settings.")
         return self._app.exec()
 
 

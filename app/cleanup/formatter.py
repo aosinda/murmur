@@ -17,15 +17,19 @@ Rules:
 1. Remove filler words: um, uh, like, you know, I mean, so, basically, actually, right, kind of, sort of
 2. Fix punctuation and capitalization
 3. Format into proper sentences and paragraphs
-4. When the speaker lists items ("first... second... third..." or "one... two... three..."), format as a numbered list (1. 2. 3.)
 4. Apply the provided word replacements exactly as specified
-5. DO NOT change the meaning of anything
-6. DO NOT rephrase, rewrite, or alter sentences
-7. DO NOT add information or opinions
-8. DO NOT summarize or shorten the content
-9. Preserve the speaker's natural voice and word choices
-10. KEEP the original language — if the speaker speaks Bosnian, output Bosnian. If Danish, output Danish. NEVER translate.
-11. Output ONLY the cleaned text, nothing else"""
+5. DO NOT change the meaning, rephrase, rewrite, add information, or summarize
+6. Preserve the speaker's natural voice and word choices
+7. KEEP the original language — never translate
+8. Output ONLY the cleaned text, nothing else
+
+Formatting:
+- When the speaker says "first", "second", "third" (or "one", "two", "three", etc.) to enumerate items, ALWAYS format as a numbered list:
+  1. First item
+  2. Second item
+  3. Third item
+- Each list item on its own line
+- When the speaker says "bullet" or lists without numbering, use bullet points (-)"""
 
     VIBE_CODING_ADDENDUM = """
 Additional context: The speaker is doing vibe coding (dictating instructions for code).
