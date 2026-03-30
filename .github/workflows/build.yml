@@ -1,0 +1,145 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v0.1.0
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build .app bundle
+        run: |
+          pyinstaller \
+            --name Murmur \
+            --windowed \
+            --onedir \
+            --noconfirm \
+            --clean \
+            --osx-bundle-identifier com.murmur.dictation \
+            --add-data "app:app" \
+            --hidden-import AppKit \
+            --hidden-import Quartz \
+            --hidden-import Foundation \
+            --hidden-import PyQt6.QtCore \
+            --hidden-import PyQt6.QtGui \
+            --hidden-import PyQt6.QtWidgets \
+            --hidden-import sounddevice \
+            --hidden-import numpy \
+            --hidden-import faster_whisper \
+            app/main.py
+
+      - name: Add Info.plist entries
+        run: |
+          PLIST="dist/Murmur.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Murmur needs microphone access for voice dictation.'" "$PLIST" 2>/dev/null || true
+
+      - name: Ad-hoc sign
+        run: codesign --force --deep --sign - "dist/Murmur.app"
+
+      - name: Create DMG
+        run: |
+          mkdir -p dmg_contents
+          cp -r dist/Murmur.app dmg_contents/
+          ln -s /Applications dmg_contents/Applications
+          hdiutil create -volname "Murmur" -srcfolder dmg_contents -ov -format UDZO "Murmur-macOS.dmg"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Murmur-macOS
+          path: Murmur-macOS.dmg
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build .exe
+        run: |
+          pyinstaller `
+            --name Murmur `
+            --windowed `
+            --onedir `
+            --noconfirm `
+            --clean `
+            --add-data "app;app" `
+            --hidden-import pynput `
+            --hidden-import PyQt6.QtCore `
+            --hidden-import PyQt6.QtGui `
+            --hidden-import PyQt6.QtWidgets `
+            --hidden-import sounddevice `
+            --hidden-import numpy `
+            --hidden-import faster_whisper `
+            app/main.py
+
+      - name: Create zip
+        run: Compress-Archive -Path dist/Murmur/* -DestinationPath Murmur-Windows.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Murmur-Windows
+          path: Murmur-Windows.zip
+
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Murmur-macOS
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Murmur-Windows
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Murmur-macOS.dmg
+            Murmur-Windows.zip
+          body: |
+            ## Murmur ${{ github.ref_name }}
+
+            ### Download
+            - **macOS**: `Murmur-macOS.dmg` — open, drag to Applications
+            - **Windows**: `Murmur-Windows.zip` — extract, run `Murmur.exe`
+
+            ### First launch
+            Murmur walks you through setup — choose Cloud (OpenAI API) or Local (offline), set your shortcuts, and start dictating.
+
+            ### macOS note
+            After installing, add Murmur to **System Settings > Privacy & Security > Accessibility**.
+          generate_release_notes: true
