@@ -15,8 +15,6 @@ from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
 from app.audio.recorder import AudioRecorder
 from app.hotkeys.listener import HotkeyListener
-from app.transcription.whisper_client import WhisperClient
-from app.cleanup.formatter import TextFormatter
 from app.output.injector import TextInjector
 from app.storage.db import MurmurDB
 from app.ui.bar import DictationBar
@@ -66,20 +64,30 @@ class Murmur:
 
     def _start_app(self):
         """Initialize all modules and start the app."""
-        api_key = os.environ.get("OPENAI_API_KEY", "")
-        if not api_key:
-            # Re-check from file in case onboarding just wrote it
-            load_dotenv(_config_dir / ".env", override=True)
-            api_key = os.environ.get("OPENAI_API_KEY", "")
-
-        if not api_key:
-            print("ERROR: OPENAI_API_KEY not set.")
-            sys.exit(1)
+        mode = self._db.get_setting("transcription_mode", "cloud")
 
         self._recorder = AudioRecorder()
-        self._whisper = WhisperClient(api_key=api_key)
-        self._formatter = TextFormatter(api_key=api_key)
         self._injector = TextInjector()
+
+        if mode == "local":
+            from app.transcription.whisper_local import LocalWhisperClient
+            from app.cleanup.formatter_local import LocalTextFormatter
+            self._whisper = LocalWhisperClient()
+            self._formatter = LocalTextFormatter()
+        else:
+            api_key = os.environ.get("OPENAI_API_KEY", "")
+            if not api_key:
+                load_dotenv(_config_dir / ".env", override=True)
+                api_key = os.environ.get("OPENAI_API_KEY", "")
+
+            if not api_key:
+                print("ERROR: OPENAI_API_KEY not set.")
+                sys.exit(1)
+
+            from app.transcription.whisper_client import WhisperClient
+            from app.cleanup.formatter import TextFormatter
+            self._whisper = WhisperClient(api_key=api_key)
+            self._formatter = TextFormatter(api_key=api_key)
 
         # Load saved mic device
         saved_mic = self._db.get_setting("mic_device_id")
