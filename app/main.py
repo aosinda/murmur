@@ -14,7 +14,6 @@ from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
 from app.audio.recorder import AudioRecorder
-from app.audio.feedback import play_start_sound, play_stop_sound
 from app.hotkeys.listener import HotkeyListener
 from app.output.injector import TextInjector
 from app.storage.db import MurmurDB
@@ -122,6 +121,9 @@ class Murmur:
         # ── Purge old dictations on startup ──
         self._db._purge_old()
 
+        # ── Show bar ──
+        self._bar.show_bar()
+
     def _setup_tray(self) -> None:
         """Create system tray icon and menu."""
         self._tray = QSystemTrayIcon(self._app)
@@ -179,6 +181,7 @@ class Murmur:
         # Bar button signals
         self._bar.cancel_clicked.connect(self._cancel_recording)
         self._bar.stop_clicked.connect(self._stop_recording)
+        self._bar.play_clicked.connect(self._start_recording_from_ui)
 
         # Settings changes
         self._settings_window.settings_changed.connect(self._on_settings_changed)
@@ -188,11 +191,16 @@ class Murmur:
     def _on_recording_started(self):
         self._bar.show_recording()
         self._main_window.set_status("recording")
-        play_start_sound()
 
     def _on_recording_cancelled(self):
         self._bar.hide_recording()
         self._main_window.set_status("ready")
+
+    def _start_recording_from_ui(self) -> None:
+        """Start recording from the play button on the bar."""
+        if not self._recorder.is_recording:
+            self._recorder.start()
+            self._signals.recording_started.emit()
 
     def _on_hotkey_start(self) -> None:
         self._recorder.start()
@@ -227,7 +235,6 @@ class Murmur:
     def _process_audio(self, audio_bytes: bytes, duration: float) -> None:
         self._bar.hide_recording()
         self._main_window.set_status("processing")
-        play_stop_sound()
 
         if not audio_bytes or duration < 0.3:
             self._main_window.set_status("ready")

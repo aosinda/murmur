@@ -10,6 +10,7 @@ Uses CGEventTap for reliable Fn key detection on macOS.
 """
 
 import sys
+import time
 import threading
 from enum import Enum
 from typing import Callable
@@ -75,7 +76,7 @@ class HotkeyListener:
         self._tap = Quartz.CGEventTapCreate(
             Quartz.kCGSessionEventTap,
             Quartz.kCGHeadInsertEventTap,
-            Quartz.kCGEventTapOptionDefault,  # Active tap — can suppress events
+            Quartz.kCGEventTapOptionListenOnly,
             event_mask,
             self._event_callback,
             None,
@@ -99,58 +100,43 @@ class HotkeyListener:
     def _event_callback(self, proxy, event_type, event, refcon):
         try:
             if event_type == Quartz.kCGEventFlagsChanged:
-                consumed = self._handle_flags_changed(event)
-                if consumed:
-                    return None  # Swallow Fn — prevents emoji picker
+                self._handle_flags_changed(event)
             elif event_type == Quartz.kCGEventKeyDown:
-                consumed = self._handle_key_down(event)
-                if consumed:
-                    return None  # Swallow Fn+Space
+                self._handle_key_down(event)
         except Exception as e:
             print(f"[Murmur] Hotkey error: {e}", file=sys.stderr, flush=True)
 
-        return event  # Pass all other keys through unchanged
+        return event
 
-    def _handle_flags_changed(self, event) -> bool:
-        """Handle modifier key changes. Returns True if event should be consumed."""
+    def _handle_flags_changed(self, event) -> None:
         flags = Quartz.CGEventGetFlags(event)
         fn_pressed = bool(flags & kCGEventFlagMaskSecondaryFn)
 
-        # Only consume Fn-related events, let other modifiers pass through
-        fn_changed = fn_pressed != self._fn_held
-        if not fn_changed:
-            return False
-
         if fn_pressed and not self._fn_held:
-            # Fn just pressed
             self._fn_held = True
             self._space_pressed_with_fn = False
 
-            if self._toggle_active:
-                self._toggle_active = False
-                self._stop_recording()
-            elif not self._recording:
+            if not self._toggle_active and not self._recording:
                 self._start_recording()
 
-            return True  # Consume — suppress emoji picker
-
         elif not fn_pressed and self._fn_held:
-            # Fn just released
             self._fn_held = False
 
             if self._space_pressed_with_fn:
                 self._space_pressed_with_fn = False
-                self._toggle_active = True
-                self._start_toggle_timer()
+                if self._toggle_active:
+                    # Fn+Space again → stop toggle
+                    self._toggle_active = False
+                    self._stop_recording()
+                else:
+                    # Fn+Space first time → enter toggle mode
+                    self._toggle_active = True
+                    self._start_toggle_timer()
             elif self._recording and not self._toggle_active:
+                # Push-to-talk release → stop
                 self._stop_recording()
 
-            return True  # Consume Fn release too
-
-        return False
-
-    def _handle_key_down(self, event) -> bool:
-        """Handle key presses. Returns True if event should be consumed."""
+    def _handle_key_down(self, event) -> None:
         keycode = Quartz.CGEventGetIntegerValueField(
             event, Quartz.kCGKeyboardEventKeycode
         )
@@ -158,7 +144,6 @@ class HotkeyListener:
         # Fn + Space → mark that toggle was requested
         if keycode == SPACE_KEYCODE and self._fn_held:
             self._space_pressed_with_fn = True
-            return True  # Consume — don't type a space
 
         # Ctrl+Cmd+V → re-insert last output
         elif keycode == V_KEYCODE:
@@ -167,15 +152,11 @@ class HotkeyListener:
             has_cmd = bool(flags & Quartz.kCGEventFlagMaskCommand)
             if has_ctrl and has_cmd and self._on_reinsert:
                 self._on_reinsert()
-                return True
 
         # Escape → cancel
         elif keycode == ESCAPE_KEYCODE and self._recording:
             self._cancel_recording()
             self._toggle_active = False
-            return True
-
-        return False
 
     def _start_recording(self) -> None:
         self._recording = True
