@@ -1,6 +1,6 @@
 # Murmur
 
-Private voice dictation for macOS and Windows. Your words stay yours.
+Voice dictation that stays on your machine. Go fully offline with local Whisper, or use OpenAI's API — your choice.
 
 ## Quick Start
 
@@ -23,7 +23,7 @@ Add **Terminal.app** to **System Settings > Privacy & Security > Accessibility**
 .venv/bin/python -m app.main
 ```
 
-### Windows
+### Windows (experimental)
 
 ```bash
 .venv\Scripts\python -m app.main
@@ -74,7 +74,7 @@ Click the green tray icon to open the dashboard:
 - Custom dictionary for word replacements
 - Vibe coding mode for dictating code
 - First-launch onboarding for non-coders
-- Cross-platform: macOS and Windows
+- macOS first, Windows support experimental
 
 ## Roadmap
 
