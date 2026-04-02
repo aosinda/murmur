@@ -14,6 +14,7 @@ from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
 from app.audio.recorder import AudioRecorder
+from app.audio.feedback import play_start_sound, play_stop_sound
 from app.hotkeys.listener import HotkeyListener
 from app.output.injector import TextInjector
 from app.storage.db import MurmurDB
@@ -187,6 +188,7 @@ class Murmur:
     def _on_recording_started(self):
         self._bar.show_recording()
         self._main_window.set_status("recording")
+        play_start_sound()
 
     def _on_recording_cancelled(self):
         self._bar.hide_recording()
@@ -225,6 +227,7 @@ class Murmur:
     def _process_audio(self, audio_bytes: bytes, duration: float) -> None:
         self._bar.hide_recording()
         self._main_window.set_status("processing")
+        play_stop_sound()
 
         if not audio_bytes or duration < 0.3:
             self._main_window.set_status("ready")

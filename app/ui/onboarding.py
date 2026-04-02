@@ -13,12 +13,13 @@ from PyQt6.QtWidgets import (
 )
 
 
-DARK_BG = "#1a1a1a"
-CARD_BG = "#252525"
-CARD_SELECTED = "#2a3a2e"
+DARK_BG = "#111111"
+CARD_BG = "#1e1e1e"
+CARD_SELECTED = "#1a2e20"
 ACCENT = "#64c882"
-TEXT_PRIMARY = "#ffffff"
-TEXT_SECONDARY = "#999999"
+ACCENT_GLOW = "rgba(100, 200, 130, 0.12)"
+TEXT_PRIMARY = "#f0f0f0"
+TEXT_SECONDARY = "#777777"
 ERROR_COLOR = "#e05555"
 
 BUTTON_STYLE = f"""
@@ -50,12 +51,14 @@ SECONDARY_BUTTON_STYLE = f"""
 
 def _card_style(selected=False):
     bg = CARD_SELECTED if selected else CARD_BG
-    border = ACCENT if selected else "#444444"
+    border = ACCENT if selected else "#2a2a2a"
+    glow = f"0 0 12px {ACCENT_GLOW}" if selected else "none"
     return f"""
-        QFrame, QWidget#modeCard {{
+        QWidget#modeCard {{
             background-color: {bg};
             border: 2px solid {border};
-            border-radius: 12px;
+            border-radius: 14px;
+            padding: 4px;
         }}
     """
 
@@ -120,11 +123,17 @@ class OnboardingWindow(QWidget):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
-        subtitle = QLabel("Private voice dictation.\nYour words stay yours.")
-        subtitle.setFont(QFont("SF Pro", 14))
+        subtitle = QLabel("Voice dictation that stays private.")
+        subtitle.setFont(QFont("SF Pro", 15))
         subtitle.setStyleSheet(f"color: {TEXT_SECONDARY};")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(subtitle)
+
+        tagline = QLabel("Your words, your choice — cloud or fully offline.")
+        tagline.setFont(QFont("SF Pro", 12))
+        tagline.setStyleSheet(f"color: #555555;")
+        tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(tagline)
 
         layout.addStretch()
 
@@ -141,57 +150,82 @@ class OnboardingWindow(QWidget):
     def _mode_page(self):
         page, layout = self._make_page()
 
-        title = QLabel("Choose Your Setup")
-        title.setFont(QFont("SF Pro", 22, QFont.Weight.Bold))
+        title = QLabel("How do you want to transcribe?")
+        title.setFont(QFont("SF Pro", 20, QFont.Weight.Bold))
         layout.addWidget(title)
 
-        desc = QLabel("How should Murmur process your voice?")
-        desc.setFont(QFont("SF Pro", 13))
-        desc.setStyleSheet(f"color: {TEXT_SECONDARY};")
-        layout.addWidget(desc)
-
-        layout.addSpacing(8)
+        layout.addSpacing(12)
 
         # Cloud card
         self._cloud_card = QWidget()
         self._cloud_card.setObjectName("modeCard")
         self._cloud_card.setStyleSheet(_card_style(False))
         self._cloud_card.setCursor(Qt.CursorShape.PointingHandCursor)
-        cloud_layout = QVBoxLayout(self._cloud_card)
-        cloud_layout.setContentsMargins(16, 14, 16, 14)
+        cloud_layout = QHBoxLayout(self._cloud_card)
+        cloud_layout.setContentsMargins(18, 16, 18, 16)
+        cloud_layout.setSpacing(14)
 
-        cloud_title = QLabel("Cloud — OpenAI API")
-        cloud_title.setFont(QFont("SF Pro", 14, QFont.Weight.Bold))
-        cloud_layout.addWidget(cloud_title)
+        cloud_icon = QLabel("\u2601")
+        cloud_icon.setFont(QFont("SF Pro", 28))
+        cloud_icon.setFixedWidth(40)
+        cloud_layout.addWidget(cloud_icon, alignment=Qt.AlignmentFlag.AlignTop)
 
-        cloud_desc = QLabel("Best accuracy. Uses Whisper + GPT for transcription and cleanup.\nRequires an OpenAI API key. ~$6/month for heavy use.")
-        cloud_desc.setFont(QFont("SF Pro", 12))
+        cloud_text_col = QVBoxLayout()
+        cloud_text_col.setSpacing(4)
+        cloud_title = QLabel("Cloud")
+        cloud_title.setFont(QFont("SF Pro", 15, QFont.Weight.Bold))
+        cloud_text_col.addWidget(cloud_title)
+
+        cloud_sub = QLabel("Best accuracy  \u00b7  OpenAI API key required")
+        cloud_sub.setFont(QFont("SF Pro", 12))
+        cloud_sub.setStyleSheet(f"color: {ACCENT};")
+        cloud_text_col.addWidget(cloud_sub)
+
+        cloud_desc = QLabel("Whisper + GPT for transcription and smart cleanup.\nAbout $6/month with heavy daily use.")
+        cloud_desc.setFont(QFont("SF Pro", 11))
         cloud_desc.setStyleSheet(f"color: {TEXT_SECONDARY};")
         cloud_desc.setWordWrap(True)
-        cloud_layout.addWidget(cloud_desc)
+        cloud_text_col.addWidget(cloud_desc)
+
+        cloud_layout.addLayout(cloud_text_col)
 
         self._cloud_card.mousePressEvent = lambda _: self._select_mode("cloud")
         layout.addWidget(self._cloud_card)
 
-        layout.addSpacing(8)
+        layout.addSpacing(10)
 
         # Local card
         self._local_card = QWidget()
         self._local_card.setObjectName("modeCard")
         self._local_card.setStyleSheet(_card_style(False))
         self._local_card.setCursor(Qt.CursorShape.PointingHandCursor)
-        local_layout = QVBoxLayout(self._local_card)
-        local_layout.setContentsMargins(16, 14, 16, 14)
+        local_layout = QHBoxLayout(self._local_card)
+        local_layout.setContentsMargins(18, 16, 18, 16)
+        local_layout.setSpacing(14)
 
-        local_title = QLabel("Local — Fully Offline")
-        local_title.setFont(QFont("SF Pro", 14, QFont.Weight.Bold))
-        local_layout.addWidget(local_title)
+        local_icon = QLabel("\U0001f4bb")
+        local_icon.setFont(QFont("SF Pro", 28))
+        local_icon.setFixedWidth(40)
+        local_layout.addWidget(local_icon, alignment=Qt.AlignmentFlag.AlignTop)
 
-        local_desc = QLabel("Free, private, no API key needed.\nUses a local Whisper model. Good accuracy, slightly slower first run\n(downloads ~150 MB model once).")
-        local_desc.setFont(QFont("SF Pro", 12))
+        local_text_col = QVBoxLayout()
+        local_text_col.setSpacing(4)
+        local_title = QLabel("Local")
+        local_title.setFont(QFont("SF Pro", 15, QFont.Weight.Bold))
+        local_text_col.addWidget(local_title)
+
+        local_sub = QLabel("Fully offline  \u00b7  Free  \u00b7  No account needed")
+        local_sub.setFont(QFont("SF Pro", 12))
+        local_sub.setStyleSheet(f"color: {ACCENT};")
+        local_text_col.addWidget(local_sub)
+
+        local_desc = QLabel("Runs a local Whisper model on your machine.\nDownloads ~150 MB once, then works without internet.")
+        local_desc.setFont(QFont("SF Pro", 11))
         local_desc.setStyleSheet(f"color: {TEXT_SECONDARY};")
         local_desc.setWordWrap(True)
-        local_layout.addWidget(local_desc)
+        local_text_col.addWidget(local_desc)
+
+        local_layout.addLayout(local_text_col)
 
         self._local_card.mousePressEvent = lambda _: self._select_mode("local")
         layout.addWidget(self._local_card)
@@ -486,16 +520,16 @@ class OnboardingWindow(QWidget):
         if platform.system() == "Darwin":
             perms_text = (
                 "Murmur needs two macOS permissions:\n\n"
-                "1. Accessibility — so it can detect keyboard shortcuts "
-                "and paste text into your apps\n\n"
-                "2. Microphone — so it can hear you\n\n"
-                "macOS will ask you to grant these when you first use Murmur. "
-                "Click Allow when prompted."
+                "1. Accessibility — for keyboard shortcuts and pasting text\n"
+                "   Go to System Settings > Privacy & Security > Accessibility\n"
+                "   and add Murmur (or Terminal if running from terminal)\n\n"
+                "2. Microphone — macOS will ask when you first record.\n"
+                "   Just click Allow."
             )
         else:
             perms_text = (
                 "Murmur needs microphone access to record your voice.\n\n"
-                "Windows will ask you to grant this when you first use Murmur."
+                "Windows will ask when you first record. Just click Allow."
             )
 
         desc = QLabel(perms_text)
@@ -506,8 +540,7 @@ class OnboardingWindow(QWidget):
 
         layout.addStretch()
 
-        mode_label = "Cloud (OpenAI)" if self._selected_mode == "cloud" else "Local (offline)"
-        tip = QLabel(f"Mode: {mode_label}\nLook for the green dot in your menu bar — that's Murmur.")
+        tip = QLabel("Look for the green dot in your menu bar — that's Murmur.\nClick it to open the dashboard.")
         tip.setFont(QFont("SF Pro", 12))
         tip.setStyleSheet(f"color: {ACCENT};")
         tip.setWordWrap(True)

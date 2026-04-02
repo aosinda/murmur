@@ -21,6 +21,9 @@ build_app.py
 murmur.spec
 setup.py
 
+# Private dev notes
+BUILDING.md
+
 # Audio temp files
 *.wav
 *.mp3
