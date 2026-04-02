@@ -23,6 +23,14 @@ Add **Terminal.app** to **System Settings > Privacy & Security > Accessibility**
 .venv/bin/python -m app.main
 ```
 
+**Tip:** Add an alias so you can just type `murmur` to launch:
+
+```bash
+echo 'alias murmur="cd ~/projects/murmur && .venv/bin/python -m app.main &"' >> ~/.zshrc
+```
+
+Then open a new terminal and type `murmur`.
+
 ### Windows (experimental)
 
 ```bash
