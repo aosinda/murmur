@@ -62,21 +62,25 @@ class DictationBar(QWidget):
     cancel_clicked = pyqtSignal()
     stop_clicked = pyqtSignal()
     play_clicked = pyqtSignal()
+    time_warning = pyqtSignal()  # emitted at 1 minute remaining
 
     BAR_WIDTH = 140
     BAR_HEIGHT = 30
     CORNER_RADIUS = 15
     BG_COLOR = QColor(20, 20, 20, 210)
+    MAX_DURATION = 360  # 6 minutes (OpenAI limit)
 
     def __init__(self):
         super().__init__()
         self._elapsed_seconds = 0
         self._recording = False
+        self._warning_shown = False
         self._tick_timer = QTimer(self)
         self._tick_timer.timeout.connect(self._tick)
 
         self._setup_window()
         self._setup_ui()
+        self._setup_warning_label()
 
     def _setup_window(self) -> None:
         self.setWindowFlags(
@@ -186,6 +190,34 @@ class DictationBar(QWidget):
         self._stop_btn.clicked.connect(self.stop_clicked.emit)
         self._layout.addWidget(self._stop_btn)
 
+    def _setup_warning_label(self) -> None:
+        """Floating label that appears above the bar for time warnings."""
+        self._warning_label = QLabel(self)
+        self._warning_label.setFont(QFont("SF Pro", 10))
+        self._warning_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._warning_label.setStyleSheet(
+            "color: rgba(255, 180, 80, 0.95);"
+            "background: transparent;"
+        )
+        self._warning_label.setVisible(False)
+
+        # Fade-out timer
+        self._warning_fade_timer = QTimer(self)
+        self._warning_fade_timer.setSingleShot(True)
+        self._warning_fade_timer.timeout.connect(self._hide_warning)
+
+    def _show_warning(self, text: str) -> None:
+        self._warning_label.setText(text)
+        self._warning_label.adjustSize()
+        # Position centered above the bar
+        x = (self.width() - self._warning_label.width()) // 2
+        self._warning_label.move(x, -20)
+        self._warning_label.setVisible(True)
+        self._warning_fade_timer.start(5000)
+
+    def _hide_warning(self) -> None:
+        self._warning_label.setVisible(False)
+
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -224,20 +256,31 @@ class DictationBar(QWidget):
     def show_recording(self) -> None:
         self._recording = True
         self._elapsed_seconds = 0
+        self._warning_shown = False
         self._timer_label.setText("0:00")
+        self._timer_label.setStyleSheet("color: rgba(255, 255, 255, 0.85);")
         self._set_recording()
         self._tick_timer.start(1000)
 
     def hide_recording(self) -> None:
         self._recording = False
         self._tick_timer.stop()
+        self._hide_warning()
         self._set_idle()
 
     def _tick(self) -> None:
         self._elapsed_seconds += 1
+        remaining = self.MAX_DURATION - self._elapsed_seconds
         minutes = self._elapsed_seconds // 60
         seconds = self._elapsed_seconds % 60
         self._timer_label.setText(f"{minutes}:{seconds:02d}")
+
+        # Warning at 1 minute remaining
+        if remaining == 60 and not self._warning_shown:
+            self._warning_shown = True
+            self._timer_label.setStyleSheet("color: rgba(255, 180, 80, 0.95);")
+            self._show_warning("1 minute left")
+            self.time_warning.emit()
 
     def _position_bottom_center(self) -> None:
         screen = QApplication.primaryScreen()

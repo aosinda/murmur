@@ -33,15 +33,35 @@ class AudioRecorder:
         self._frames = []
         self._recording = True
 
-        self._stream = sd.InputStream(
+        try:
+            self._stream = self._open_stream(self._device_id)
+        except Exception:
+            # Saved device failed — fall back to system default
+            if self._device_id is not None:
+                print(f"[Murmur] Device {self._device_id} failed, falling back to default mic.",
+                      flush=True)
+                try:
+                    self._stream = self._open_stream(None)
+                    self._device_id = None
+                except Exception as e:
+                    self._recording = False
+                    raise RuntimeError(f"No working audio input: {e}") from e
+            else:
+                self._recording = False
+                raise
+
+        self._stream.start()
+
+    def _open_stream(self, device_id: int | None) -> sd.InputStream:
+        """Open a PortAudio InputStream for the given device."""
+        return sd.InputStream(
             samplerate=self.SAMPLE_RATE,
             channels=self.CHANNELS,
             dtype=self.DTYPE,
-            device=self._device_id,
+            device=device_id,
             callback=self._audio_callback,
             blocksize=1024,
         )
-        self._stream.start()
 
     def stop(self) -> bytes:
         """Stop recording and return WAV bytes."""

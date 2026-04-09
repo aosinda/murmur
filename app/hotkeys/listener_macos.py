@@ -161,7 +161,11 @@ class HotkeyListener:
     def _start_recording(self) -> None:
         self._recording = True
         if self._on_start:
-            self._on_start()
+            try:
+                self._on_start()
+            except Exception:
+                self._recording = False
+                raise
 
     def _stop_recording(self) -> None:
         self._recording = False

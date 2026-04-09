@@ -13,6 +13,7 @@ from PyQt6.QtCore import Qt, QObject, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
+from app.audio.feedback import play_warning_sound
 from app.audio.recorder import AudioRecorder
 from app.hotkeys.listener import HotkeyListener
 from app.output.injector import TextInjector
@@ -183,6 +184,9 @@ class Murmur:
         self._bar.stop_clicked.connect(self._stop_recording)
         self._bar.play_clicked.connect(self._start_recording_from_ui)
 
+        # Time warning
+        self._bar.time_warning.connect(self._on_time_warning)
+
         # Settings changes
         self._settings_window.settings_changed.connect(self._on_settings_changed)
 
@@ -214,6 +218,9 @@ class Murmur:
     def _on_hotkey_cancel(self) -> None:
         self._recorder.cancel()
         self._signals.recording_cancelled.emit()
+
+    def _on_time_warning(self) -> None:
+        play_warning_sound()
 
     def _on_reinsert(self) -> None:
         last = self._injector.get_last_text()

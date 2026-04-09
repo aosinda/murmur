@@ -49,3 +49,24 @@ def play_stop_sound() -> None:
         else:
             _play_beep(660, 80)
     threading.Thread(target=_play, daemon=True).start()
+
+
+def play_warning_sound() -> None:
+    """Play a gentle two-tone chime for time warnings."""
+    def _play():
+        try:
+            import numpy as np
+            import sounddevice as sd
+            sr = 44100
+            # Two soft notes: D5 → A4
+            for freq in (587, 440):
+                t = np.linspace(0, 0.12, int(sr * 0.12), False)
+                wave = 0.2 * np.sin(2 * np.pi * freq * t)
+                fade = min(len(wave), 300)
+                wave[:fade] *= np.linspace(0, 1, fade)
+                wave[-fade:] *= np.linspace(1, 0, fade)
+                sd.play(wave.astype(np.float32), sr)
+                sd.wait()
+        except Exception:
+            pass
+    threading.Thread(target=_play, daemon=True).start()
