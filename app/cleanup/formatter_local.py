@@ -66,15 +66,16 @@ class LocalTextFormatter:
             ("seventh", "7"), ("eighth", "8"), ("ninth", "9"), ("tenth", "10"),
         ]
 
-        # Only format if at least 2 ordinals are present
-        count = sum(1 for w, _ in ordinals if re.search(rf"\b{w}\b", text, re.IGNORECASE))
+        # Match "first" or "firstly", "second" or "secondly", etc.
+        def pattern(word):
+            return rf"\b{word}(?:ly)?[,:]?\s*"
+
+        count = sum(1 for w, _ in ordinals if re.search(pattern(w), text, re.IGNORECASE))
         if count < 2:
             return text
 
         for word, num in ordinals:
-            text = re.sub(
-                rf"\b{word}[,:]?\s*", f"\n{num}. ", text, flags=re.IGNORECASE
-            )
+            text = re.sub(pattern(word), f"\n{num}. ", text, flags=re.IGNORECASE)
 
         return text.strip()
 

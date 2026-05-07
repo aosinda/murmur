@@ -73,8 +73,10 @@ class Murmur:
         if mode == "local":
             from app.transcription.whisper_local import LocalWhisperClient
             from app.cleanup.formatter_local import LocalTextFormatter
-            self._whisper = LocalWhisperClient()
+            model_size = self._db.get_setting("local_model_size", "small")
+            self._whisper = LocalWhisperClient(model_size=model_size)
             self._formatter = LocalTextFormatter()
+            print(f"[Murmur] Transcription engine: local Whisper ({self._whisper._model_size})")
         else:
             api_key = os.environ.get("OPENAI_API_KEY", "")
             if not api_key:
@@ -89,6 +91,7 @@ class Murmur:
             from app.cleanup.formatter import TextFormatter
             self._whisper = WhisperClient(api_key=api_key)
             self._formatter = TextFormatter(api_key=api_key)
+            print(f"[Murmur] Transcription engine: cloud OpenAI ({self._whisper._model})")
 
         # Load saved mic device
         saved_mic = self._db.get_setting("mic_device_id")
@@ -203,12 +206,18 @@ class Murmur:
     def _start_recording_from_ui(self) -> None:
         """Start recording from the play button on the bar."""
         if not self._recorder.is_recording:
-            self._recorder.start()
-            self._signals.recording_started.emit()
+            try:
+                self._recorder.start()
+                self._signals.recording_started.emit()
+            except Exception as e:
+                self._signals.error_occurred.emit(str(e))
 
     def _on_hotkey_start(self) -> None:
-        self._recorder.start()
-        self._signals.recording_started.emit()
+        try:
+            self._recorder.start()
+            self._signals.recording_started.emit()
+        except Exception as e:
+            self._signals.error_occurred.emit(str(e))
 
     def _on_hotkey_stop(self) -> None:
         duration = self._recorder.get_duration()
@@ -254,20 +263,29 @@ class Murmur:
                 )
                 languages = [l.strip() for l in lang_setting.split(",")]
 
-                result = self._whisper.transcribe(audio_bytes, languages=languages)
-                raw_text = result["text"]
-                language = result["language"]
+                for attempt in range(2):
+                    try:
+                        result = self._whisper.transcribe(audio_bytes, languages=languages)
+                        raw_text = result["text"]
+                        language = result["language"]
 
-                if not raw_text.strip():
-                    self._main_window.set_status("ready")
-                    return
+                        if not raw_text.strip():
+                            self._main_window.set_status("ready")
+                            return
 
-                vibe = self._db.get_setting("vibe_coding", "False")
-                cleaned = self._formatter.format(
-                    raw_text=raw_text,
-                    language=language,
-                    vibe_coding=vibe.lower() == "true",
-                )
+                        vibe = self._db.get_setting("vibe_coding", "False")
+                        cleaned = self._formatter.format(
+                            raw_text=raw_text,
+                            language=language,
+                            vibe_coding=vibe.lower() == "true",
+                        )
+                        break
+                    except Exception as api_err:
+                        import openai
+                        if attempt == 0 and isinstance(api_err, openai.OpenAIError):
+                            self._switch_to_local()
+                            continue
+                        raise
 
                 mode = "vibe_coding" if vibe.lower() == "true" else "normal"
                 self._db.save_dictation(
@@ -312,6 +330,18 @@ class Murmur:
         self._dictionary_window.show()
         self._dictionary_window.raise_()
 
+    def _switch_to_cloud(self) -> None:
+        """Switch back to cloud (OpenAI) transcription."""
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
+            load_dotenv(_config_dir / ".env", override=True)
+            api_key = os.environ.get("OPENAI_API_KEY", "")
+        from app.transcription.whisper_client import WhisperClient
+        from app.cleanup.formatter import TextFormatter
+        self._whisper = WhisperClient(api_key=api_key)
+        self._formatter = TextFormatter(api_key=api_key)
+        print(f"[Murmur] Transcription engine: cloud OpenAI ({self._whisper._model})")
+
     def _on_settings_changed(self, settings: dict) -> None:
         mic_id = settings.get("mic_device_id")
         if mic_id:
@@ -319,6 +349,45 @@ class Murmur:
                 self._recorder.set_device(int(mic_id))
             except (ValueError, TypeError):
                 self._recorder.set_device(None)
+
+        mode = settings.get("transcription_mode")
+        if mode == "local":
+            size = settings.get("local_model_size")
+            threading.Thread(target=self._switch_to_local, args=(size,), daemon=True).start()
+        elif mode == "cloud":
+            self._switch_to_cloud()
+
+    def _switch_to_local(self, model_size: str | None = None) -> None:
+        """Switch to local Whisper + local formatter (safe to call from any thread)."""
+        from app.transcription.whisper_local import LocalWhisperClient
+        from app.cleanup.formatter_local import LocalTextFormatter
+
+        size = model_size or self._db.get_setting("local_model_size", "small")
+        model_path = LocalWhisperClient.MODEL_DIR / f"models--Systran--faster-whisper-{size}"
+        first_download = not model_path.exists()
+
+        sizes_mb = {"tiny": 75, "base": 145, "small": 244, "medium": 769, "large-v3": 1500}
+        mb = sizes_mb.get(size, "?")
+
+        if first_download:
+            print(f"[Murmur] Downloading Whisper {size} model (~{mb} MB)...")
+            self._tray.showMessage(
+                "Murmur — Downloading Model",
+                f"Downloading Whisper {size} model (~{mb} MB). This happens once.",
+                QSystemTrayIcon.MessageIcon.Information,
+                15000,
+            )
+
+        self._whisper = LocalWhisperClient(model_size=size)
+        self._formatter = LocalTextFormatter()
+        print(f"[Murmur] Transcription engine: local Whisper ({self._whisper._model_size})")
+
+        self._tray.showMessage(
+            "Murmur — Local Mode Active",
+            f"On-device Whisper ({size}) is ready.",
+            QSystemTrayIcon.MessageIcon.Information,
+            4000,
+        )
 
     def _on_error(self, error_msg: str) -> None:
         self._main_window.set_status("ready")

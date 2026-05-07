@@ -31,7 +31,7 @@ class SettingsWindow(QWidget):
 
     def _setup_window(self) -> None:
         self.setWindowTitle("Murmur — Settings")
-        self.setFixedSize(450, 520)
+        self.setFixedSize(450, 610)
         self.setWindowFlags(
             Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint
         )
@@ -79,6 +79,38 @@ class SettingsWindow(QWidget):
         lang_layout.addWidget(self._lang_list)
         layout.addWidget(lang_group)
 
+        # ── Transcription Engine ──
+        engine_group = QGroupBox("Transcription Engine")
+        engine_layout = QVBoxLayout(engine_group)
+
+        engine_row = QHBoxLayout()
+        engine_row.addWidget(QLabel("Mode:"))
+        self._engine_combo = QComboBox()
+        self._engine_combo.addItem("Cloud (OpenAI)", "cloud")
+        self._engine_combo.addItem("Local (on-device)", "local")
+        engine_row.addWidget(self._engine_combo)
+        engine_layout.addLayout(engine_row)
+
+        self._model_row = QHBoxLayout()
+        self._model_row.addWidget(QLabel("Model:"))
+        self._model_combo = QComboBox()
+        self._model_combo.addItem("Tiny  — fastest, ~75 MB", "tiny")
+        self._model_combo.addItem("Base  — fast, ~145 MB", "base")
+        self._model_combo.addItem("Small — recommended, ~244 MB", "small")
+        self._model_combo.addItem("Medium — accurate, ~769 MB", "medium")
+        self._model_combo.addItem("Large — most accurate, ~1.5 GB", "large-v3")
+        self._model_row.addWidget(self._model_combo)
+        engine_layout.addLayout(self._model_row)
+
+        engine_note = QLabel("Local runs fully on-device — no API key needed.")
+        engine_note.setStyleSheet("color: #888; font-size: 11px;")
+        engine_layout.addWidget(engine_note)
+
+        layout.addWidget(engine_group)
+
+        self._engine_combo.currentIndexChanged.connect(self._on_engine_changed)
+        self._on_engine_changed()
+
         # ── Mode ──
         mode_group = QGroupBox("Dictation Mode")
         mode_layout = QVBoxLayout(mode_group)
@@ -112,6 +144,13 @@ class SettingsWindow(QWidget):
 
         layout.addStretch()
 
+    def _on_engine_changed(self) -> None:
+        is_local = self._engine_combo.currentData() == "local"
+        for i in range(self._model_row.count()):
+            item = self._model_row.itemAt(i)
+            if item and item.widget():
+                item.widget().setVisible(is_local)
+
     def _refresh_devices(self) -> None:
         """Reload available audio input devices."""
         self._mic_combo.clear()
@@ -144,6 +183,8 @@ class SettingsWindow(QWidget):
             "mic_device_id": str(self.get_selected_mic_id() or ""),
             "languages": ",".join(self.get_selected_languages()),
             "vibe_coding": str(self.is_vibe_coding()),
+            "transcription_mode": self._engine_combo.currentData(),
+            "local_model_size": self._model_combo.currentData(),
         }
 
         if self._db:
@@ -166,6 +207,18 @@ class SettingsWindow(QWidget):
                 item.setCheckState(Qt.CheckState.Checked)
             else:
                 item.setCheckState(Qt.CheckState.Unchecked)
+
+        # Load transcription engine
+        mode = self._db.get_setting("transcription_mode", "cloud")
+        idx = self._engine_combo.findData(mode)
+        if idx >= 0:
+            self._engine_combo.setCurrentIndex(idx)
+
+        # Load local model size
+        model_size = self._db.get_setting("local_model_size", "small")
+        idx = self._model_combo.findData(model_size)
+        if idx >= 0:
+            self._model_combo.setCurrentIndex(idx)
 
         # Load vibe coding
         vibe = self._db.get_setting("vibe_coding", "False")

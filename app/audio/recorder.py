@@ -1,6 +1,7 @@
 """Audio recording module — captures mic input into a buffer."""
 
 import io
+import time
 import wave
 import threading
 import numpy as np
@@ -36,19 +37,27 @@ class AudioRecorder:
         try:
             self._stream = self._open_stream(self._device_id)
         except Exception:
-            # Saved device failed — fall back to system default
+            # Saved device failed — fall back to system default, with retries
+            # to handle the brief window when macOS is switching devices
             if self._device_id is not None:
                 print(f"[Murmur] Device {self._device_id} failed, falling back to default mic.",
                       flush=True)
+                self._device_id = None
+
+            last_err = None
+            for attempt in range(4):
+                if attempt > 0:
+                    time.sleep(0.4)
                 try:
                     self._stream = self._open_stream(None)
-                    self._device_id = None
+                    last_err = None
+                    break
                 except Exception as e:
-                    self._recording = False
-                    raise RuntimeError(f"No working audio input: {e}") from e
-            else:
+                    last_err = e
+
+            if last_err:
                 self._recording = False
-                raise
+                raise RuntimeError(f"No working audio input: {last_err}") from last_err
 
         self._stream.start()
 

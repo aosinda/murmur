@@ -52,7 +52,12 @@ class LocalWhisperClient:
             if languages:
                 language_hint = self._to_iso_code(languages[0])
 
-            kwargs = {}
+            kwargs = {
+                "initial_prompt": (
+                    "Clean speech transcription. "
+                    "Do not include filler words like um, uh, ah, er, erm."
+                ),
+            }
             if language_hint:
                 kwargs["language"] = language_hint
 
