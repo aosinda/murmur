@@ -23,6 +23,7 @@ setup.py
 
 # Private dev notes
 BUILDING.md
+TODO.md
 
 # Audio temp files
 *.wav

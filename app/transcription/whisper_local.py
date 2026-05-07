@@ -1,8 +1,6 @@
 """Speech-to-text using a local Whisper model via faster-whisper."""
 
-import io
 import tempfile
-import wave
 from pathlib import Path
 
 
@@ -30,57 +28,30 @@ class LocalWhisperClient:
         audio_bytes: bytes,
         languages: list[str] | None = None,
     ) -> dict:
-        """Transcribe audio bytes to text.
-
-        Args:
-            audio_bytes: WAV audio data.
-            languages: List of expected languages (first is used as hint).
-
-        Returns:
-            dict with keys: "text", "language"
-        """
         if not audio_bytes:
             return {"text": "", "language": "unknown"}
 
-        # Write WAV to temp file (faster-whisper needs a file path)
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             f.write(audio_bytes)
             tmp_path = f.name
 
         try:
-            language_hint = None
+            # No hard language= — let Whisper auto-detect per utterance.
+            # Soft hint via initial_prompt so it knows what languages to expect.
+            lang_hint = ""
             if languages:
-                language_hint = self._to_iso_code(languages[0])
+                lang_hint = f"Speech may be in: {', '.join(languages[:5])}. "
 
-            kwargs = {
-                "initial_prompt": (
-                    "Clean speech transcription. "
-                    "Do not include filler words like um, uh, ah, er, erm."
-                ),
-            }
-            if language_hint:
-                kwargs["language"] = language_hint
-
-            segments, info = self._model.transcribe(tmp_path, **kwargs)
+            segments, info = self._model.transcribe(
+                tmp_path,
+                initial_prompt=f"{lang_hint}Clean transcription without filler words like um, uh, ah.",
+            )
 
             text = " ".join(seg.text.strip() for seg in segments)
 
             return {
                 "text": text,
-                "language": info.language or language_hint or "en",
+                "language": info.language or "unknown",
             }
         finally:
             Path(tmp_path).unlink(missing_ok=True)
-
-    @staticmethod
-    def _to_iso_code(language: str) -> str:
-        mapping = {
-            "english": "en", "bosnian": "bs", "danish": "da",
-            "german": "de", "french": "fr", "spanish": "es",
-            "italian": "it", "portuguese": "pt", "dutch": "nl",
-            "swedish": "sv", "norwegian": "no", "finnish": "fi",
-            "polish": "pl", "turkish": "tr", "russian": "ru",
-            "arabic": "ar", "chinese": "zh", "japanese": "ja",
-            "korean": "ko", "hindi": "hi", "croatian": "hr", "serbian": "sr",
-        }
-        return mapping.get(language.lower(), language.lower()[:2])

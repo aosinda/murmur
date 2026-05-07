@@ -102,8 +102,13 @@ class MurmurDB:
         return [dict(row) for row in cursor.fetchall()]
 
     def _purge_old(self) -> None:
-        """Delete dictations older than retention period."""
-        cutoff = datetime.utcnow() - timedelta(hours=self.RETENTION_HOURS)
+        """Delete dictations older than the configured retention period."""
+        retention = self.get_setting("history_retention", "24h")
+        hours_map = {"24h": 24, "7d": 168, "30d": 720}
+        hours = hours_map.get(retention)
+        if hours is None:
+            return  # "forever" — keep everything
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
         self._conn.execute(
             "DELETE FROM dictations WHERE timestamp < ?",
             (cutoff.isoformat(),),
@@ -120,17 +125,19 @@ class MurmurDB:
 
         stats = dict(row)
 
-        # Calculate weeks active
         first_use = datetime.fromisoformat(stats["first_use_date"])
-        weeks = max(1, (datetime.utcnow() - first_use).days // 7)
-        stats["weeks_active"] = weeks
+        now = datetime.utcnow()
+        days_active = max(1, (now - first_use).days + 1)
+        stats["weeks_active"] = max(1, days_active // 7)
 
-        # Calculate average WPM
         total_minutes = stats["total_seconds"] / 60
-        if total_minutes > 0:
-            stats["avg_wpm"] = round(stats["total_words"] / total_minutes)
-        else:
-            stats["avg_wpm"] = 0
+        stats["avg_wpm"] = round(stats["total_words"] / total_minutes) if total_minutes > 0 else 0
+
+        total_h = stats["total_seconds"] / 3600
+        stats["total_hours"] = total_h
+
+        avg_daily_s = stats["total_seconds"] / days_active
+        stats["avg_daily_minutes"] = round(avg_daily_s / 60, 1)
 
         return stats
 

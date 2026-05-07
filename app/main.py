@@ -21,8 +21,6 @@ from app.storage.db import MurmurDB
 from app.ui.bar import DictationBar
 from app.ui.onboarding import OnboardingWindow
 from app.ui.main_window import MainWindow
-from app.ui.settings import SettingsWindow
-from app.ui.dictionary import DictionaryEditor
 
 
 # Load .env — check multiple locations
@@ -102,10 +100,12 @@ class Murmur:
                 pass
 
         # ── UI ──
+        from app.ui.theme import get as get_palette
+        self._palette = get_palette(self._db.get_setting("theme", "light"))
+
         self._bar = DictationBar()
-        self._main_window = MainWindow(db=self._db)
-        self._settings_window = SettingsWindow(db=self._db)
-        self._dictionary_window = DictionaryEditor(formatter=self._formatter)
+        self._main_window = MainWindow(db=self._db, palette=self._palette)
+        self._main_window.set_formatter(self._formatter)
 
         # ── System tray ──
         self._setup_tray()
@@ -152,10 +152,6 @@ class Murmur:
 
         menu.addSeparator()
 
-        dict_action = QAction("Dictionary", menu)
-        dict_action.triggered.connect(self._show_dictionary)
-        menu.addAction(dict_action)
-
         settings_action = QAction("Settings", menu)
         settings_action.triggered.connect(self._show_settings)
         menu.addAction(settings_action)
@@ -190,8 +186,8 @@ class Murmur:
         # Time warning
         self._bar.time_warning.connect(self._on_time_warning)
 
-        # Settings changes
-        self._settings_window.settings_changed.connect(self._on_settings_changed)
+        # Settings changes now come from the main window
+        self._main_window.settings_changed.connect(self._on_settings_changed)
 
     # ── Recording control ──────────────────────────────────────────
 
@@ -323,12 +319,9 @@ class Murmur:
         self._main_window.raise_()
 
     def _show_settings(self) -> None:
-        self._settings_window.show()
-        self._settings_window.raise_()
-
-    def _show_dictionary(self) -> None:
-        self._dictionary_window.show()
-        self._dictionary_window.raise_()
+        self._main_window.show_settings()
+        self._main_window.show()
+        self._main_window.raise_()
 
     def _switch_to_cloud(self) -> None:
         """Switch back to cloud (OpenAI) transcription."""
@@ -340,6 +333,7 @@ class Murmur:
         from app.cleanup.formatter import TextFormatter
         self._whisper = WhisperClient(api_key=api_key)
         self._formatter = TextFormatter(api_key=api_key)
+        self._main_window.set_formatter(self._formatter)
         print(f"[Murmur] Transcription engine: cloud OpenAI ({self._whisper._model})")
 
     def _on_settings_changed(self, settings: dict) -> None:
@@ -356,6 +350,12 @@ class Murmur:
             threading.Thread(target=self._switch_to_local, args=(size,), daemon=True).start()
         elif mode == "cloud":
             self._switch_to_cloud()
+
+        theme = settings.get("theme")
+        if theme:
+            from app.ui.theme import get as get_palette
+            self._palette = get_palette(theme)
+            self._main_window.apply_theme(self._palette)
 
     def _switch_to_local(self, model_size: str | None = None) -> None:
         """Switch to local Whisper + local formatter (safe to call from any thread)."""
@@ -380,6 +380,7 @@ class Murmur:
 
         self._whisper = LocalWhisperClient(model_size=size)
         self._formatter = LocalTextFormatter()
+        self._main_window.set_formatter(self._formatter)
         print(f"[Murmur] Transcription engine: local Whisper ({self._whisper._model_size})")
 
         self._tray.showMessage(
