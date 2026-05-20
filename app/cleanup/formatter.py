@@ -1,4 +1,4 @@
-"""Text formatting and cleanup via GPT-5.4 Nano."""
+"""Text formatting and cleanup via GPT-5.4 Mini."""
 
 import json
 from pathlib import Path
@@ -8,7 +8,7 @@ from openai import OpenAI
 class TextFormatter:
     """Cleans up raw transcription: removes filler, applies dictionary, formats."""
 
-    DEFAULT_MODEL = "gpt-5.4-nano"
+    DEFAULT_MODEL = "gpt-5.4-mini"
     DICTIONARY_PATH = Path.home() / ".murmur" / "dictionary.json"
 
     SYSTEM_PROMPT = """You are a dictation formatter. Your ONLY job is to clean up spoken text.
