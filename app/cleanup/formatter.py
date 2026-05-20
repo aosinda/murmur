@@ -39,11 +39,6 @@ Additional context: The speaker is doing vibe coding (dictating instructions for
 - Keep imperative instructions clear and direct
 - If they mention file paths, function names, or variables, keep them exact"""
 
-    # When raw text is at most this many words, skip the GPT call and route
-    # through the local regex formatter instead. GPT adds ~1 second per call;
-    # for short utterances the local formatter produces the same quality.
-    SKIP_GPT_WORD_LIMIT = 25
-
     def __init__(
         self,
         api_key: str | None = None,
@@ -65,24 +60,6 @@ Additional context: The speaker is doing vibe coding (dictating instructions for
         self._model = model or self.DEFAULT_MODEL
         self._dictionary: dict[str, str] = {}
         self._load_dictionary()
-        # Lazy-initialized local formatter for the fast path.
-        self._local_formatter = None
-
-    def _can_skip_gpt(self, raw_text: str, vibe_coding: bool) -> bool:
-        # Vibe coding needs the model's judgment for casing/paths/identifiers.
-        if vibe_coding:
-            return False
-        word_count = len(raw_text.split())
-        return word_count <= self.SKIP_GPT_WORD_LIMIT
-
-    def _format_locally(self, raw_text: str, language: str) -> str:
-        from app.cleanup.formatter_local import LocalTextFormatter
-        if self._local_formatter is None:
-            self._local_formatter = LocalTextFormatter()
-        # Sync the local formatter's dictionary with ours so replacements apply
-        # the same way regardless of which path runs.
-        self._local_formatter.update_dictionary(self._dictionary)
-        return self._local_formatter.format(raw_text, language=language, vibe_coding=False)
 
     def format(
         self,
@@ -90,19 +67,7 @@ Additional context: The speaker is doing vibe coding (dictating instructions for
         language: str = "english",
         vibe_coding: bool = False,
     ) -> str:
-        """Clean up raw transcription text.
-
-        Short utterances are handled by the local regex formatter to avoid a
-        round-trip to GPT. Longer or vibe-coding utterances go to GPT.
-
-        Args:
-            raw_text: Raw transcription from the transcription model.
-            language: Detected language of the speech.
-            vibe_coding: Whether vibe coding mode is active.
-
-        Returns:
-            Cleaned, formatted text.
-        """
+        """Clean up raw transcription text via GPT."""
         if not raw_text.strip():
             return ""
 
