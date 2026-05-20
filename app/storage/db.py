@@ -1,6 +1,7 @@
 """SQLite storage — ephemeral dictation history + permanent stats."""
 
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,6 +17,7 @@ class MurmurDB:
         self._db_path = db_path or self.DB_PATH
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
+        self._lock = threading.Lock()
         self._init_db()
 
     def _init_db(self) -> None:
@@ -71,25 +73,26 @@ class MurmurDB:
         """Save a dictation entry and update stats."""
         word_count = len(cleaned_text.split())
 
-        cursor = self._conn.execute(
-            """INSERT INTO dictations
-               (raw_text, cleaned_text, language, mode, duration_seconds, word_count)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (raw_text, cleaned_text, language, mode, duration_seconds, word_count),
-        )
+        with self._lock:
+            cursor = self._conn.execute(
+                """INSERT INTO dictations
+                   (raw_text, cleaned_text, language, mode, duration_seconds, word_count)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (raw_text, cleaned_text, language, mode, duration_seconds, word_count),
+            )
 
-        # Update lifetime stats
-        self._conn.execute(
-            """UPDATE stats SET
-               total_words = total_words + ?,
-               total_sessions = total_sessions + 1,
-               total_seconds = total_seconds + ?
-               WHERE id = 1""",
-            (word_count, duration_seconds),
-        )
+            # Update lifetime stats
+            self._conn.execute(
+                """UPDATE stats SET
+                   total_words = total_words + ?,
+                   total_sessions = total_sessions + 1,
+                   total_seconds = total_seconds + ?
+                   WHERE id = 1""",
+                (word_count, duration_seconds),
+            )
 
-        self._conn.commit()
-        return cursor.lastrowid
+            self._conn.commit()
+            return cursor.lastrowid
 
     def get_recent_dictations(self, limit: int = 50) -> list[dict]:
         """Get recent dictations (within retention period)."""
@@ -109,11 +112,12 @@ class MurmurDB:
         if hours is None:
             return  # "forever" — keep everything
         cutoff = datetime.utcnow() - timedelta(hours=hours)
-        self._conn.execute(
-            "DELETE FROM dictations WHERE timestamp < ?",
-            (cutoff.isoformat(),),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM dictations WHERE timestamp < ?",
+                (cutoff.isoformat(),),
+            )
+            self._conn.commit()
 
     # ── Stats (permanent) ──────────────────────────────────────────
 
@@ -152,11 +156,12 @@ class MurmurDB:
 
     def set_setting(self, key: str, value: str) -> None:
         """Set a setting value."""
-        self._conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-            (key, value),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+            self._conn.commit()
 
     def get_all_settings(self) -> dict[str, str]:
         """Get all settings as a dict."""

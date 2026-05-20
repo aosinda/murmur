@@ -17,11 +17,12 @@ Rules:
 1. Remove filler words: um, uh, like, you know, I mean, so, basically, actually, right, kind of, sort of
 2. Fix punctuation and capitalization
 3. Format into proper sentences and paragraphs
-4. Apply the provided word replacements exactly as specified
+4. Apply dictionary replacements ONLY when the spoken phrase clearly matches the intended word — not when the word appears in a different context
 5. DO NOT change the meaning, rephrase, rewrite, add information, or summarize
-6. Preserve the speaker's natural voice and word choices
-7. KEEP the original language — never translate
-8. Output ONLY the cleaned text, nothing else
+6. When the speaker corrects themselves (says a word then immediately says a different word as a correction), keep ONLY the corrected version. Example: "taste it, test it" → "test it"
+7. Preserve the speaker's natural voice and word choices
+8. KEEP the original language — never translate
+9. Output ONLY the cleaned text, nothing else
 
 Formatting:
 - When the speaker says "first", "second", "third" (or "one", "two", "three", etc.) to enumerate items, ALWAYS format as a numbered list:
@@ -104,9 +105,6 @@ Additional context: The speaker is doing vibe coding (dictating instructions for
         """
         if not raw_text.strip():
             return ""
-
-        if self._can_skip_gpt(raw_text, vibe_coding):
-            return self._format_locally(raw_text, language)
 
         system = self.SYSTEM_PROMPT
         if vibe_coding:
