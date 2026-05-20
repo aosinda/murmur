@@ -38,11 +38,50 @@ Additional context: The speaker is doing vibe coding (dictating instructions for
 - Keep imperative instructions clear and direct
 - If they mention file paths, function names, or variables, keep them exact"""
 
-    def __init__(self, api_key: str, model: str | None = None):
-        self._client = OpenAI(api_key=api_key)
+    # When raw text is at most this many words, skip the GPT call and route
+    # through the local regex formatter instead. GPT adds ~1 second per call;
+    # for short utterances the local formatter produces the same quality.
+    SKIP_GPT_WORD_LIMIT = 25
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        client: OpenAI | None = None,
+    ):
+        """Create a formatter.
+
+        Either pass a pre-built `client` (preferred, lets us share an HTTP
+        connection pool with the transcribe client) or pass `api_key` and
+        we'll build our own.
+        """
+        if client is not None:
+            self._client = client
+        else:
+            if not api_key:
+                raise ValueError("TextFormatter requires either client= or api_key=")
+            self._client = OpenAI(api_key=api_key)
         self._model = model or self.DEFAULT_MODEL
         self._dictionary: dict[str, str] = {}
         self._load_dictionary()
+        # Lazy-initialized local formatter for the fast path.
+        self._local_formatter = None
+
+    def _can_skip_gpt(self, raw_text: str, vibe_coding: bool) -> bool:
+        # Vibe coding needs the model's judgment for casing/paths/identifiers.
+        if vibe_coding:
+            return False
+        word_count = len(raw_text.split())
+        return word_count <= self.SKIP_GPT_WORD_LIMIT
+
+    def _format_locally(self, raw_text: str, language: str) -> str:
+        from app.cleanup.formatter_local import LocalTextFormatter
+        if self._local_formatter is None:
+            self._local_formatter = LocalTextFormatter()
+        # Sync the local formatter's dictionary with ours so replacements apply
+        # the same way regardless of which path runs.
+        self._local_formatter.update_dictionary(self._dictionary)
+        return self._local_formatter.format(raw_text, language=language, vibe_coding=False)
 
     def format(
         self,
@@ -52,8 +91,11 @@ Additional context: The speaker is doing vibe coding (dictating instructions for
     ) -> str:
         """Clean up raw transcription text.
 
+        Short utterances are handled by the local regex formatter to avoid a
+        round-trip to GPT. Longer or vibe-coding utterances go to GPT.
+
         Args:
-            raw_text: Raw transcription from Whisper.
+            raw_text: Raw transcription from the transcription model.
             language: Detected language of the speech.
             vibe_coding: Whether vibe coding mode is active.
 
@@ -62,6 +104,9 @@ Additional context: The speaker is doing vibe coding (dictating instructions for
         """
         if not raw_text.strip():
             return ""
+
+        if self._can_skip_gpt(raw_text, vibe_coding):
+            return self._format_locally(raw_text, language)
 
         system = self.SYSTEM_PROMPT
         if vibe_coding:

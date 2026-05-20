@@ -7,6 +7,8 @@ import threading
 import numpy as np
 import sounddevice as sd
 
+from app.audio.devices import DeviceManager
+
 
 class AudioRecorder:
     """Records audio from the selected input device."""
@@ -34,20 +36,43 @@ class AudioRecorder:
         self._frames = []
         self._recording = True
 
+        # Always flush PortAudio's cached device list before opening.
+        # If AirPods were the default at app launch and got disconnected,
+        # InputStream(device=None) still "succeeds" silently against the
+        # stale default and produces no audio — so we never see an
+        # exception to trigger the retry path. Refreshing here makes
+        # `default` resolve to whatever macOS actually has selected now.
+        DeviceManager.refresh()
+
+        # Preflight: drop a saved device id that's clearly gone (AirPods
+        # removed, USB mic unplugged).
+        if self._device_id is not None and not self._device_exists(self._device_id):
+            print(f"[Murmur] Device {self._device_id} no longer present, using default.",
+                  flush=True)
+            self._device_id = None
+
+        print(f"[Murmur] Recording from: {DeviceManager.describe(self._device_id)}",
+              flush=True)
+
         try:
             self._stream = self._open_stream(self._device_id)
-        except Exception:
-            # Saved device failed — fall back to system default, with retries
-            # to handle the brief window when macOS is switching devices
+        except Exception as first_err:
+            # PortAudio caches the device topology at init time, so when
+            # macOS switches the default input (AirPods out, etc.) even
+            # device=None can resolve to a stale, now-invalid device.
+            # Refresh PortAudio and retry against the system default.
             if self._device_id is not None:
                 print(f"[Murmur] Device {self._device_id} failed, falling back to default mic.",
                       flush=True)
                 self._device_id = None
 
-            last_err = None
+            last_err = first_err
             for attempt in range(4):
                 if attempt > 0:
                     time.sleep(0.4)
+                DeviceManager.refresh()
+                print(f"[Murmur] Retry {attempt + 1}/4 after refresh → "
+                      f"{DeviceManager.describe(None)}", flush=True)
                 try:
                     self._stream = self._open_stream(None)
                     last_err = None
@@ -71,6 +96,17 @@ class AudioRecorder:
             callback=self._audio_callback,
             blocksize=1024,
         )
+
+    @staticmethod
+    def _device_exists(device_id: int) -> bool:
+        try:
+            devices = sd.query_devices()
+        except Exception:
+            return False
+        if not (0 <= device_id < len(devices)):
+            return False
+        return devices[device_id].get("max_input_channels", 0) > 0
+
 
     def stop(self) -> bytes:
         """Stop recording and return WAV bytes."""

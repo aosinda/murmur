@@ -4,13 +4,13 @@ import platform
 from collections import defaultdict
 from datetime import datetime
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QApplication, QFrame, QStackedWidget,
     QComboBox, QCheckBox, QListWidget, QListWidgetItem,
-    QLineEdit, QSizePolicy,
+    QLineEdit, QSizePolicy, QRadioButton, QButtonGroup,
 )
 
 from app.ui.theme import Palette, LIGHT
@@ -182,7 +182,7 @@ class Sidebar(QWidget):
     APPEARANCE = 5
 
     _NAV_LABELS = ["Home", "Dictionary"]
-    _SETTINGS_LABELS = ["General", "Languages", "Transcription", "Appearance"]
+    _SETTINGS_LABELS = ["General", "Languages", "Engine", "Appearance"]
 
     def __init__(self, p: Palette):
         super().__init__()
@@ -236,7 +236,7 @@ class Sidebar(QWidget):
         self._save_btn = QPushButton("Save Settings")
         self._save_btn.setFixedHeight(36)
         self._save_btn.setFont(QFont("", 13, QFont.Weight.Medium))
-        self._save_btn.clicked.connect(self.save_requested.emit)
+        self._save_btn.clicked.connect(self._on_save_clicked)
         self._save_btn.setVisible(False)
         lay.addWidget(self._save_btn)
 
@@ -250,6 +250,22 @@ class Sidebar(QWidget):
         if self._save_btn:
             self._save_btn.setVisible(idx >= len(self._NAV_LABELS))
         self.nav_changed.emit(idx)
+
+    def _on_save_clicked(self):
+        # Run the actual save first so downstream wiring is unchanged…
+        self.save_requested.emit()
+        # …then flash visible feedback on the button itself.
+        if not self._save_btn:
+            return
+        self._save_btn.setText("Saved ✓")
+        self._save_btn.setEnabled(False)
+        QTimer.singleShot(1500, self._restore_save_btn)
+
+    def _restore_save_btn(self):
+        if not self._save_btn:
+            return
+        self._save_btn.setText("Save Settings")
+        self._save_btn.setEnabled(True)
 
     def _apply_palette(self):
         p = self._p
@@ -686,6 +702,11 @@ class GeneralPage(QWidget):
         from app.audio.devices import DeviceManager
         current = self._mic_combo.currentData()
         self._mic_combo.clear()
+        # First entry is an explicit "System default" sentinel carrying None.
+        # Without it, the combo would silently default to index 0 (whichever
+        # device PortAudio happens to list first), and just clicking Save
+        # would write that arbitrary id to the DB.
+        self._mic_combo.addItem("System default", None)
         for dev in DeviceManager.list_input_devices():
             self._mic_combo.addItem(dev["name"] + (" (Default)" if dev["is_default"] else ""), dev["id"])
         if current is not None:
@@ -705,16 +726,27 @@ class GeneralPage(QWidget):
                 idx = self._mic_combo.findData(int(saved_mic))
                 if idx >= 0:
                     self._mic_combo.setCurrentIndex(idx)
+                else:
+                    # Saved device isn't in the current list (unplugged etc.).
+                    # Fall back to "System default" rather than silently landing
+                    # on whatever sits at index 0.
+                    self._mic_combo.setCurrentIndex(0)
             except (ValueError, TypeError):
-                pass
+                self._mic_combo.setCurrentIndex(0)
+        else:
+            # No saved id — explicitly select the "System default" sentinel.
+            self._mic_combo.setCurrentIndex(0)
         self._vibe_cb.setChecked(self._db.get_setting("vibe_coding", "False").lower() == "true")
         idx = self._retention_combo.findData(self._db.get_setting("history_retention", "24h"))
         if idx >= 0:
             self._retention_combo.setCurrentIndex(idx)
 
     def get_values(self) -> dict:
+        mic_data = self._mic_combo.currentData()
         return {
-            "mic_device_id": str(self._mic_combo.currentData() or ""),
+            # Use `is None` rather than truthiness — device id 0 is a valid id
+            # but evaluates falsy, so `or ""` would silently drop it.
+            "mic_device_id": "" if mic_data is None else str(mic_data),
             "vibe_coding": str(self._vibe_cb.isChecked()),
             "history_retention": self._retention_combo.currentData(),
         }
@@ -819,76 +851,310 @@ class LanguagesPage(QWidget):
         self._apply_palette()
 
 
+class _EngineCard(QFrame):
+    """Click-to-select card with a radio anchor, title, side-tag, description."""
+
+    clicked = pyqtSignal()
+
+    def __init__(self, title: str, tag: str, desc: str, p: Palette):
+        super().__init__()
+        self._p = p
+        self._selected = False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(18, 16, 18, 16)
+        outer.setSpacing(14)
+
+        # Radio anchor (left). The card itself is clickable, but the radio
+        # also stays interactive so screen-readers / keyboard nav still work.
+        self.radio = QRadioButton()
+        self.radio.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.radio.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        outer.addWidget(self.radio, alignment=Qt.AlignmentFlag.AlignTop)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(4)
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(10)
+        self._title_lbl = QLabel(title)
+        self._title_lbl.setFont(QFont("", 14, QFont.Weight.DemiBold))
+        title_row.addWidget(self._title_lbl)
+        title_row.addStretch()
+        self._tag_lbl = QLabel(tag)
+        self._tag_lbl.setFont(QFont("", 11, QFont.Weight.Medium))
+        title_row.addWidget(self._tag_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
+        text_col.addLayout(title_row)
+
+        self._desc_lbl = QLabel(desc)
+        self._desc_lbl.setFont(QFont("", 12))
+        self._desc_lbl.setWordWrap(True)
+        text_col.addWidget(self._desc_lbl)
+
+        outer.addLayout(text_col, stretch=1)
+
+        self._apply_style()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def set_selected(self, v: bool):
+        if self._selected == v:
+            self.radio.setChecked(v)
+            return
+        self._selected = v
+        self.radio.setChecked(v)
+        self._apply_style()
+
+    def apply_theme(self, p: Palette):
+        self._p = p
+        self._apply_style()
+
+    def _apply_style(self):
+        p = self._p
+        # Selected: 2px accent border. Unselected: 1px subtle border.
+        border = f"2px solid {p.accent}" if self._selected else f"1px solid {p.border}"
+        # Compensate the 1px border diff with padding so the layout doesn't jump.
+        pad_outer = 17 if self._selected else 18
+        self.setStyleSheet(f"""
+            _EngineCard {{
+                background: {p.surface};
+                border: {border};
+                border-radius: 12px;
+            }}
+            QLabel {{ background: transparent; border: none; }}
+            QRadioButton {{ background: transparent; border: none; }}
+        """)
+        # Re-apply margins to account for border width change so contents don't shift.
+        self.layout().setContentsMargins(pad_outer, pad_outer - 2, pad_outer, pad_outer - 2)
+        self._title_lbl.setStyleSheet(f"color: {p.text};")
+        self._tag_lbl.setStyleSheet(f"color: {p.accent}; font-weight: 500;")
+        self._desc_lbl.setStyleSheet(f"color: {p.subtext};")
+
+
+class _QualityOption(QWidget):
+    """A single quality choice: radio + title + small subtitle."""
+
+    clicked = pyqtSignal()
+
+    def __init__(self, title: str, subtitle: str, p: Palette):
+        super().__init__()
+        self._p = p
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(4, 6, 4, 6)
+        lay.setSpacing(12)
+
+        self.radio = QRadioButton()
+        self.radio.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.radio.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        lay.addWidget(self.radio, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(1)
+        self._title_lbl = QLabel(title)
+        self._title_lbl.setFont(QFont("", 13, QFont.Weight.Medium))
+        text_col.addWidget(self._title_lbl)
+        self._sub_lbl = QLabel(subtitle)
+        self._sub_lbl.setFont(QFont("", 11))
+        text_col.addWidget(self._sub_lbl)
+        lay.addLayout(text_col, stretch=1)
+
+        self._apply_style()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def apply_theme(self, p: Palette):
+        self._p = p
+        self._apply_style()
+
+    def _apply_style(self):
+        p = self._p
+        self.setStyleSheet("background: transparent;")
+        self._title_lbl.setStyleSheet(f"color: {p.text}; background: transparent;")
+        self._sub_lbl.setStyleSheet(f"color: {p.subtext}; background: transparent;")
+
+
 class TranscriptionPage(QWidget):
+    """Engine settings — radio-card layout for cloud/local + quality picker."""
+
     def __init__(self, db, p: Palette):
         super().__init__()
         self._db = db
         self._p = p
-        self._rows: list[SettingRow] = []
+        self._engine_cards: dict[str, _EngineCard] = {}
+        self._quality_options: dict[str, _QualityOption] = {}
         self._setup()
 
     def _setup(self):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(36, 32, 36, 32)
-        lay.setSpacing(28)
+        lay.setSpacing(0)
 
-        self._title = QLabel("Transcription")
+        self._title = QLabel("Engine")
         self._title.setFont(QFont("", 26, QFont.Weight.Bold))
         lay.addWidget(self._title)
+        lay.addSpacing(6)
 
-        self._engine_combo = _make_combo([
-            ("Cloud (OpenAI)", "cloud"),
-            ("Local (on-device)", "local"),
-        ])
-        self._model_combo = _make_combo([
-            ("Tiny — ~75 MB", "tiny"),
-            ("Base — ~145 MB", "base"),
-            ("Small — ~244 MB", "small"),
-            ("Medium — ~769 MB", "medium"),
-            ("Large — ~1.5 GB", "large-v3"),
-        ])
+        self._subtitle = QLabel("How your voice gets turned into text.")
+        self._subtitle.setFont(QFont("", 13))
+        lay.addWidget(self._subtitle)
+        lay.addSpacing(22)
 
-        self._engine_row = SettingRow("Engine", "Cloud uses OpenAI; Local runs on-device", self._engine_combo, self._p)
-        self._model_row = SettingRow("Local Model", "Larger = more accurate, slower to load", self._model_combo, self._p)
-        self._rows = [self._engine_row, self._model_row]
+        # ── Engine cards ──
+        self._engine_group = QButtonGroup(self)
+        self._engine_group.setExclusive(True)
 
-        self._engine_combo.currentIndexChanged.connect(
-            lambda: self._model_row.setVisible(self._engine_combo.currentData() == "local")
+        cloud_card = _EngineCard(
+            "Cloud",
+            "Recommended",
+            "Sends your audio directly to OpenAI on your API key. "
+            "Fastest. Most accurate. Pennies a day.",
+            self._p,
         )
+        local_card = _EngineCard(
+            "Local",
+            "Fully offline",
+            "Runs on your Mac or PC. Nothing leaves your machine. "
+            "Slower. Free.",
+            self._p,
+        )
+        self._engine_cards = {"cloud": cloud_card, "local": local_card}
 
-        self._card = _card(self._rows, self._p)
-        lay.addWidget(self._card)
+        for mode, card in self._engine_cards.items():
+            self._engine_group.addButton(card.radio)
+            card.clicked.connect(lambda m=mode: self._select_engine(m))
+            card.radio.toggled.connect(
+                lambda checked, m=mode: self._on_radio_toggled(m, checked)
+            )
+            lay.addWidget(card)
+            lay.addSpacing(10)
+
+        # ── Quality sub-section (visible only when Local is selected) ──
+        self._quality_section = QFrame()
+        self._quality_section.setFrameShape(QFrame.Shape.NoFrame)
+        qs_lay = QVBoxLayout(self._quality_section)
+        qs_lay.setContentsMargins(20, 16, 20, 16)
+        qs_lay.setSpacing(6)
+
+        self._quality_lbl = QLabel("Quality")
+        self._quality_lbl.setFont(QFont("", 12, QFont.Weight.Bold))
+        qs_lay.addWidget(self._quality_lbl)
+        qs_lay.addSpacing(4)
+
+        self._quality_group = QButtonGroup(self)
+        self._quality_group.setExclusive(True)
+
+        quality_items = [
+            ("Faster", "~1 second per dictation", "base"),
+            ("Balanced", "Recommended for most users", "small"),
+            ("Most accurate", "~7 seconds, slowest", "medium"),
+        ]
+        for title, subtitle, data in quality_items:
+            opt = _QualityOption(title, subtitle, self._p)
+            self._quality_group.addButton(opt.radio)
+            opt.clicked.connect(lambda d=data: self._select_quality(d))
+            opt.radio.toggled.connect(
+                lambda checked, d=data: self._on_quality_toggled(d, checked)
+            )
+            self._quality_options[data] = opt
+            qs_lay.addWidget(opt)
+
+        lay.addSpacing(4)
+        lay.addWidget(self._quality_section)
+
         lay.addStretch()
+
         self._load()
         self._apply_palette()
 
+    # ── Selection helpers ────────────────────────────────────────
+
+    def _select_engine(self, mode: str):
+        for m, card in self._engine_cards.items():
+            card.set_selected(m == mode)
+        self._quality_section.setVisible(mode == "local")
+
+    def _on_radio_toggled(self, mode: str, checked: bool):
+        # Keep card visual state in sync if the radio itself was toggled
+        # (e.g. via keyboard).
+        if checked:
+            self._select_engine(mode)
+
+    def _select_quality(self, data: str):
+        opt = self._quality_options.get(data)
+        if opt and not opt.radio.isChecked():
+            opt.radio.setChecked(True)
+        self._selected_quality = data
+
+    def _on_quality_toggled(self, data: str, checked: bool):
+        if checked:
+            self._selected_quality = data
+
+    # ── Persistence ──────────────────────────────────────────────
+
     def _load(self):
-        if not self._db:
-            return
-        def _set(cb, key, default):
-            idx = cb.findData(self._db.get_setting(key, default))
-            if idx >= 0:
-                cb.setCurrentIndex(idx)
-        _set(self._engine_combo, "transcription_mode", "cloud")
-        _set(self._model_combo, "local_model_size", "small")
-        self._model_row.setVisible(self._engine_combo.currentData() == "local")
+        mode = "cloud"
+        size = "small"
+        if self._db:
+            mode = self._db.get_setting("transcription_mode", "cloud") or "cloud"
+            size = self._db.get_setting("local_model_size", "small") or "small"
+
+        # Fall back to a known quality if the DB has something unsupported.
+        if size not in self._quality_options:
+            size = "small"
+        self._selected_quality = size
+        self._quality_options[size].radio.setChecked(True)
+
+        if mode not in self._engine_cards:
+            mode = "cloud"
+        self._select_engine(mode)
 
     def get_values(self) -> dict:
+        mode = "cloud"
+        for m, card in self._engine_cards.items():
+            if card.radio.isChecked():
+                mode = m
+                break
+        size = getattr(self, "_selected_quality", "small")
+        # Double-check against the actual radio state in case it drifted.
+        for data, opt in self._quality_options.items():
+            if opt.radio.isChecked():
+                size = data
+                break
         return {
-            "transcription_mode": self._engine_combo.currentData(),
-            "local_model_size": self._model_combo.currentData(),
+            "transcription_mode": mode,
+            "local_model_size": size,
         }
+
+    # ── Theming ──────────────────────────────────────────────────
 
     def _apply_palette(self):
         p = self._p
         self.setStyleSheet(f"background: {p.bg};")
         self._title.setStyleSheet(f"color: {p.text};")
-        _apply_card_theme(self._card, p)
-        cs = _combo_style(p)
-        self._engine_combo.setStyleSheet(cs)
-        self._model_combo.setStyleSheet(cs)
-        for row in self._rows:
-            row.apply_theme(p)
+        self._subtitle.setStyleSheet(f"color: {p.subtext};")
+        self._quality_lbl.setStyleSheet(
+            f"color: {p.subtext}; background: transparent; letter-spacing: 0.5px;"
+        )
+        self._quality_section.setStyleSheet(
+            f"QFrame {{ background: {p.surface}; "
+            f"border: 1px solid {p.border}; border-radius: 12px; }}"
+        )
+        for card in self._engine_cards.values():
+            card.apply_theme(p)
+        for opt in self._quality_options.values():
+            opt.apply_theme(p)
 
     def apply_theme(self, p: Palette):
         self._p = p

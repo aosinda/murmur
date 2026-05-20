@@ -85,10 +85,11 @@ class Murmur:
                 print("ERROR: OPENAI_API_KEY not set.")
                 sys.exit(1)
 
-            from app.transcription.whisper_client import WhisperClient
+            from app.transcription.cloud_transcribe import CloudTranscribeClient
             from app.cleanup.formatter import TextFormatter
-            self._whisper = WhisperClient(api_key=api_key)
-            self._formatter = TextFormatter(api_key=api_key)
+            self._openai_client = self._build_shared_openai_client(api_key)
+            self._whisper = CloudTranscribeClient(client=self._openai_client)
+            self._formatter = TextFormatter(client=self._openai_client)
             print(f"[Murmur] Transcription engine: cloud OpenAI ({self._whisper._model})")
 
         # Load saved mic device
@@ -323,16 +324,38 @@ class Murmur:
         self._main_window.show()
         self._main_window.raise_()
 
+    @staticmethod
+    def _build_shared_openai_client(api_key: str):
+        """Build a single OpenAI client with a tuned HTTP pool.
+
+        Both the transcribe client and the formatter share this so we pay
+        ONE TLS handshake to api.openai.com instead of two, and subsequent
+        calls reuse keepalive connections.
+        """
+        import httpx
+        from openai import OpenAI
+        return OpenAI(
+            api_key=api_key,
+            http_client=httpx.Client(
+                limits=httpx.Limits(max_keepalive_connections=4, keepalive_expiry=120),
+                timeout=httpx.Timeout(30.0, connect=3.0, read=25.0),
+            ),
+        )
+
     def _switch_to_cloud(self) -> None:
         """Switch back to cloud (OpenAI) transcription."""
         api_key = os.environ.get("OPENAI_API_KEY", "")
         if not api_key:
             load_dotenv(_config_dir / ".env", override=True)
             api_key = os.environ.get("OPENAI_API_KEY", "")
-        from app.transcription.whisper_client import WhisperClient
+        from app.transcription.cloud_transcribe import CloudTranscribeClient
         from app.cleanup.formatter import TextFormatter
-        self._whisper = WhisperClient(api_key=api_key)
-        self._formatter = TextFormatter(api_key=api_key)
+        # Reuse the shared client if we already have one (e.g. coming back
+        # from a local-mode detour); otherwise build it fresh.
+        if not getattr(self, "_openai_client", None):
+            self._openai_client = self._build_shared_openai_client(api_key)
+        self._whisper = CloudTranscribeClient(client=self._openai_client)
+        self._formatter = TextFormatter(client=self._openai_client)
         self._main_window.set_formatter(self._formatter)
         print(f"[Murmur] Transcription engine: cloud OpenAI ({self._whisper._model})")
 

@@ -18,12 +18,17 @@ venv/
 
 # Build files (keep locally, not in repo)
 build_app.py
-murmur.spec
+*.spec
 setup.py
+scripts/
+
+# CI/CD (premium builds only)
+.github/
 
 # Private dev notes
 BUILDING.md
 TODO.md
+PERF_NOTES.md
 
 # Audio temp files
 *.wav

@@ -76,20 +76,22 @@ Click the green tray icon to open the dashboard:
 ## Features
 
 - **Two modes**: Cloud (OpenAI Whisper + GPT) or Local (offline, free)
+- **FLAC encoding** — lossless compression cuts upload size in half
+- **Shared HTTP client** — single connection pool for faster API calls
+- **Hedged retries** — fires a backup request if the first stalls, takes whichever wins
+- **Smart formatting** — short utterances skip GPT entirely for instant results
 - Multi-language — keeps your language, never translates
 - Removes filler words (um, uh, like, you know, etc.)
 - Formats spoken lists into numbered lists
 - Custom dictionary for word replacements
 - Vibe coding mode for dictating code
+- AirPods & USB mic auto-recovery
 - First-launch onboarding for non-coders
 - macOS first, Windows support experimental
 
-## Roadmap
+## Murmur Pro
 
-- Signed macOS .app bundle (no manual Accessibility setup)
-- Auto-start on login
-- Visual waveform driven by actual audio input
-- Light/dark theme options
+Want a native app with one-click install, signed builds, auto-updates, and no terminal required? Check out [Murmur Pro](https://trymurmur.io).
 
 ## Requirements
 
