@@ -1,7 +1,7 @@
 # Murmur — Dependencies
 
-# OpenAI API (Whisper + GPT-5.4 Nano)
-openai>=1.0.0
+# OpenAI API (Whisper + GPT-5.4 Mini)
+openai>=2.37.0
 
 # Audio capture
 sounddevice>=0.4.6

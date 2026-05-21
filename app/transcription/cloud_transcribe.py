@@ -1,6 +1,7 @@
 """Speech-to-text via OpenAI's transcription API (gpt-4o-mini-transcribe)."""
 
 import io
+import time
 from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait
 
 import soundfile as sf
@@ -105,6 +106,8 @@ class CloudTranscribeClient:
 
         # Re-encode WAV → FLAC. Lossless and roughly half the bytes on the wire.
         flac_bytes = self._wav_to_flac(audio_bytes)
+        print(f"[Murmur] Batch: WAV→FLAC {len(audio_bytes)//1024}KB → {len(flac_bytes)//1024}KB",
+              flush=True)
 
         # No hard language= constraint — Whisper auto-detects per utterance.
         # We pass a soft prompt hint so it knows which languages to expect.
@@ -114,9 +117,13 @@ class CloudTranscribeClient:
         }
         if languages:
             lang_list = ", ".join(languages[:5])
-            kwargs["prompt"] = f"Speech may be in: {lang_list}. Clean transcription, no filler words."
+            kwargs["prompt"] = lang_list
 
-        response, _hedged = self._hedged_transcribe(flac_bytes, kwargs)
+        t0 = time.time()
+        response, hedged = self._hedged_transcribe(flac_bytes, kwargs)
+        api_ms = (time.time() - t0) * 1000
+        hedge_tag = " (hedged)" if hedged else ""
+        print(f"[Murmur] Batch: API returned in {api_ms:.0f}ms{hedge_tag}", flush=True)
 
         return {
             "text": response.text,

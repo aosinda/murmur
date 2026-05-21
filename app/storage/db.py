@@ -2,7 +2,6 @@
 
 import sqlite3
 import threading
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -115,7 +114,7 @@ class MurmurDB:
         with self._lock:
             self._conn.execute(
                 "DELETE FROM dictations WHERE timestamp < ?",
-                (cutoff.isoformat(),),
+                (cutoff.strftime("%Y-%m-%d %H:%M:%S"),),
             )
             self._conn.commit()
 
