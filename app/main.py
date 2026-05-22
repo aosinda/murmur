@@ -243,6 +243,26 @@ class Murmur:
         self._bar.hide_recording()
         self._main_window.set_status("ready")
 
+    # ── Hallucination filter ──────────────────────────────────────
+
+    @staticmethod
+    def _is_prompt_echo(text: str, languages: list[str]) -> bool:
+        """True when Whisper echoes the language prompt instead of real speech."""
+        import re
+        words = [w for w in re.findall(r'[a-zA-Z]+', text.lower()) if w]
+        if not words or len(words) > 15:
+            return False
+        lang_words = set()
+        for lang in languages:
+            for w in lang.lower().split():
+                lang_words.add(w)
+        noise = {
+            "and", "or", "speech", "may", "be", "in", "clean",
+            "transcription", "without", "filler", "words", "like",
+            "um", "uh", "ah", "a", "of", "is", "to",
+        }
+        return all(w in lang_words or w in noise for w in words)
+
     # ── Processing pipeline ────────────────────────────────────────
 
     def _process_audio(self, audio_bytes: bytes, duration: float) -> None:
@@ -266,7 +286,7 @@ class Murmur:
                         raw_text = result["text"]
                         language = result["language"]
 
-                        if not raw_text.strip():
+                        if not raw_text.strip() or self._is_prompt_echo(raw_text, languages):
                             self._main_window.set_status("ready")
                             return
 
